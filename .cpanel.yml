@@ -1,0 +1,48 @@
+---
+# .cpanel.yml
+# Generic deployment hooks for cPanel's Git/Deployment system.
+# Safe defaults: deploys repository contents to $HOME/public_html,
+# runs composer/npm steps if relevant, and fixes permissions.
+#
+# Notes:
+# - This is written to work when run as your cPanel user (the environment
+#   on Truehost should provide $HOME).
+# - Adjust DOCUMENT_ROOT if your site uses a different directory.
+# - If you need custom build steps (artisan migrate, environment setup),
+#   add them into the tasks below.
+
+deployment:
+  tasks:
+    - echo "Starting deployment via .cpanel.yml"
+    - export DOCUMENT_ROOT="public_html"
+    - export CPANEL_DEPLOY_DIR="$HOME/$DOCUMENT_ROOT"
+    - echo "Deploy directory: $CPANEL_DEPLOY_DIR"
+    - mkdir -p "$CPANEL_DEPLOY_DIR"
+    - rsync -a --delete --exclude='.git' --exclude='.cpanel.yml' ./ "$CPANEL_DEPLOY_DIR/"
+    - if [ -f "composer.json" ]; then
+        if command -v composer >/dev/null 2>&1; then
+          echo "composer detected: installing PHP dependencies..."
+          composer install --no-dev --optimize-autoloader --no-interaction || echo "composer install failed"
+        else
+          echo "composer not found: skipping composer install"
+        fi
+      fi
+    - if [ -f "package.json" ]; then
+        if command -v npm >/dev/null 2>&1; then
+          echo "npm detected: installing node modules and building..."
+          npm install --no-audit --no-fund || echo "npm install failed"
+          npm run build || echo "npm run build failed or no build script defined"
+        else
+          echo "npm not found: skipping npm install/build"
+        fi
+      fi
+    - echo "Fixing permissions..."
+    - find "$CPANEL_DEPLOY_DIR" -type d -exec chmod 755 {} \; || true
+    - find "$CPANEL_DEPLOY_DIR" -type f -exec chmod 644 {} \; || true
+    - echo "Setting ownership to current user (if allowed)..."
+    - if command -v id >/dev/null 2>&1; then
+        if [ -n "$USER" ]; then
+          chown -R "$USER":"$USER" "$CPANEL_DEPLOY_DIR" 2>/dev/null || true
+        fi
+      fi
+    - echo "Deployment finished."
